@@ -11,6 +11,7 @@ class ClaudeSession: ObservableObject {
     @Published var lines: [OutputLine] = []
     @Published var isReady: Bool = false
     @Published var isRunning: Bool = false
+    @Published var errorCount: Int = 0
 
     let workingDirectory: String
 
@@ -37,6 +38,19 @@ class ClaudeSession: ObservableObject {
 
     // MARK: - Public
 
+    func restart() {
+        process?.terminate()
+        process = nil
+        stdinHandle = nil
+        readBuffer = Data()
+        DispatchQueue.main.async {
+            self.lines = []
+            self.isReady = false
+            self.isRunning = false
+        }
+        start()
+    }
+
     func send(prompt: String) {
         guard !isRunning else { return }
         isRunning = true
@@ -57,7 +71,7 @@ class ClaudeSession: ObservableObject {
 
     private func start() {
         guard let claudePath = findClaude() else {
-            append("claude binary not found — checked:\n" + searchPaths().joined(separator: "\n"), kind: .error)
+            append("arkan binary not found — checked:\n" + searchPaths().joined(separator: "\n"), kind: .error)
             return
         }
 
@@ -108,6 +122,7 @@ class ClaudeSession: ObservableObject {
                 self?.isReady   = false
                 self?.isRunning = false
                 self?.append("Process exited (code \(p.terminationStatus))", kind: .system)
+                if p.terminationStatus != 0 { self?.errorCount += 1 }
             }
         }
 
@@ -121,7 +136,7 @@ class ClaudeSession: ObservableObject {
                 self.isReady = true
             }
         } catch {
-            append("Failed to launch claude: \(error.localizedDescription)", kind: .error)
+            append("Failed to launch arkan: \(error.localizedDescription)", kind: .error)
         }
     }
 
@@ -158,6 +173,7 @@ class ClaudeSession: ObservableObject {
 
             case "system" where subtype == "init":
                 self?.isReady = true
+                self?.send(prompt: "/arkan-pocket")
 
             case "assistant":
                 guard let message = json["message"] as? [String: Any],
@@ -211,11 +227,11 @@ class ClaudeSession: ObservableObject {
     private func searchPaths() -> [String] {
         let home = realHome
         return [
-            "\(home)/.local/bin/claude",
-            "\(home)/.npm-global/bin/claude",
-            "/opt/homebrew/bin/claude",
-            "/usr/local/bin/claude",
-            "/usr/bin/claude",
+            "\(home)/.local/bin/arkan",
+            "\(home)/.npm-global/bin/arkan",
+            "/opt/homebrew/bin/arkan",
+            "/usr/local/bin/arkan",
+            "/usr/bin/arkan",
         ]
     }
 

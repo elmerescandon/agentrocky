@@ -16,6 +16,23 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header
+            HStack {
+                Spacer()
+                Button(action: { session.restart() }) {
+                    Text("↺")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(.green.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .help("Reiniciar sesión")
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+
+            Divider().background(Color.green.opacity(0.15))
+
             // Terminal output
             ScrollViewReader { proxy in
                 ScrollView {
