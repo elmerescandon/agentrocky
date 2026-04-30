@@ -7,6 +7,8 @@ import SwiftUI
 
 struct ChatView: View {
     @ObservedObject var session: ClaudeSession
+    @Binding var isExpanded: Bool
+    @Environment(\.dismiss) private var dismiss
     @State private var input: String = ""
     @FocusState private var inputFocused: Bool
 
@@ -19,19 +21,29 @@ struct ChatView: View {
             // Header
             HStack {
                 Spacer()
-                Button(action: { session.restart() }) {
-                    Text("↺")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundColor(.green.opacity(0.6))
+                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                    Text(isExpanded ? "⊟" : "⊞")
+                        .font(.system(size: 17, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
-                .help("Reiniciar sesión")
+                .keyboardShortcut("e", modifiers: .command)
+                .help("Ampliar/reducir chat  ⌘E")
+
+                Button(action: { session.restart() }) {
+                    Text("↺")
+                        .font(.system(size: 17, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Reiniciar sesión  ⌘R")
             }
             .padding(.horizontal, 10)
             .padding(.top, 6)
             .padding(.bottom, 2)
 
-            Divider().background(Color.green.opacity(0.15))
+            Divider().background(Color.white.opacity(0.1))
 
             // Terminal output
             ScrollViewReader { proxy in
@@ -43,7 +55,7 @@ struct ChatView: View {
                         if session.isRunning {
                             Text("▋")
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.green)
+                                .foregroundColor(.white)
                                 .opacity(0.8)
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -54,23 +66,23 @@ struct ChatView: View {
                 .onChange(of: session.isRunning)   { _ in proxy.scrollTo("bottom") }
             }
 
-            Divider().background(Color.green.opacity(0.3))
+            Divider().background(Color.white.opacity(0.15))
 
             // Input row
             HStack(spacing: 6) {
                 Text(promptLabel)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.green.opacity(0.5))
+                    .foregroundColor(.white.opacity(0.4))
                     .lineLimit(1)
                     .truncationMode(.head)
 
                 Text("❯")
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(session.isReady ? .green : .green.opacity(0.3))
+                    .foregroundColor(session.isReady ? .white : .white.opacity(0.3))
 
                 TextField("", text: $input)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.green)
+                    .foregroundColor(.white)
                     .textFieldStyle(.plain)
                     .focused($inputFocused)
                     .onSubmit { sendMessage() }
@@ -81,6 +93,7 @@ struct ChatView: View {
         }
         .background(Color(red: 0.04, green: 0.04, blue: 0.04))
         .onAppear { inputFocused = true }
+        .onExitCommand { dismiss() }
     }
 
     private func sendMessage() {
@@ -111,10 +124,10 @@ struct TerminalLine: View {
 
     private var color: Color {
         switch line.kind {
-        case .text:   return .green
-        case .tool:   return Color(red: 0.4, green: 0.8, blue: 1.0)   // cyan for tool calls
-        case .system: return .green.opacity(0.5)
-        case .error:  return Color(red: 1.0, green: 0.4, blue: 0.4)   // red for errors
+        case .text:   return .white
+        case .tool:   return Color(red: 0.4, green: 0.8, blue: 1.0)
+        case .system: return .white.opacity(0.45)
+        case .error:  return Color(red: 1.0, green: 0.4, blue: 0.4)
         }
     }
 }

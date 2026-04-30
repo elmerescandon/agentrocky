@@ -195,7 +195,7 @@ class ClaudeSession: ObservableObject {
         case "text":
             if let text = block["text"] as? String,
                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                append("rocky: \(text)", kind: .text)
+                append("Arkán: \(text)", kind: .text)
             }
 
         case "tool_use":

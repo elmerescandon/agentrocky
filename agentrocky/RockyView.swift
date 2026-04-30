@@ -37,9 +37,14 @@ struct RockyView: View {
     @State private var bounceScale: CGFloat = 1.0
     @State private var shakeOffset: CGFloat = 0
     @State private var wasRunning = false
+    @State private var isExpanded = false
+    @State private var isDragging = false
+    @State private var dragWindowOrigin: NSPoint = .zero
+    @State private var dragMouseStart: NSPoint = .zero
 
     var body: some View {
         Button(action: {
+            guard !isDragging else { return }
             state.isChatOpen.toggle()
             showChat = state.isChatOpen
             if showChat { NSApp.activate(ignoringOtherApps: true) }
@@ -50,6 +55,28 @@ struct RockyView: View {
                 .offset(x: shakeOffset)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 3)
+                .onChanged { _ in
+                    if !isDragging {
+                        isDragging = true
+                        dragMouseStart = NSEvent.mouseLocation
+                        if let window = NSApp.windows.first(where: { $0 is NSPanel }) {
+                            dragWindowOrigin = window.frame.origin
+                        }
+                    }
+                    let mouse = NSEvent.mouseLocation
+                    if let window = NSApp.windows.first(where: { $0 is NSPanel }) {
+                        window.setFrameOrigin(NSPoint(
+                            x: dragWindowOrigin.x + (mouse.x - dragMouseStart.x),
+                            y: dragWindowOrigin.y + (mouse.y - dragMouseStart.y)
+                        ))
+                    }
+                }
+                .onEnded { _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { isDragging = false }
+                }
+        )
         .onChange(of: session.isRunning) { running in
             if wasRunning && !running {
                 bounce()
@@ -60,8 +87,8 @@ struct RockyView: View {
             shake()
         }
         .popover(isPresented: $showChat, arrowEdge: .top) {
-            ChatView(session: session)
-                .frame(width: 420, height: 520)
+            ChatView(session: session, isExpanded: $isExpanded)
+                .frame(width: isExpanded ? 720 : 420, height: isExpanded ? 800 : 520)
         }
         .onChange(of: showChat) { open in
             state.isChatOpen = open
