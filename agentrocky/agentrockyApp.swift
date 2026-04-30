@@ -20,8 +20,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var rockyWindow: NSPanel?
     var rockyState = RockyState()
 
-    private let panelWidth: CGFloat = 80
-    private let panelHeight: CGFloat = 80
+    private let panelWidth: CGFloat = 156
+    private let panelHeight: CGFloat = 156
     private let idleTimeout: TimeInterval = 120
     private let dimmedAlpha: CGFloat = 0.25
 
