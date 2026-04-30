@@ -7,13 +7,18 @@ import Foundation
 import Combine
 import Darwin
 
-class ClaudeSession: ObservableObject {
+class ClaudeSession: ObservableObject, Identifiable {
+    let id = UUID()
+    let createdAt = Date()
+    let workingDirectory: String
+
     @Published var lines: [OutputLine] = []
     @Published var isReady: Bool = false
     @Published var isRunning: Bool = false
     @Published var errorCount: Int = 0
 
-    let workingDirectory: String
+    private(set) var sessionId: String?
+    private let resumeSessionId: String?
 
     private var process: Process?
     private var stdinHandle: FileHandle?
@@ -27,16 +32,26 @@ class ClaudeSession: ObservableObject {
         enum Kind { case text, tool, system, error }
     }
 
-    init(workingDirectory: String) {
+    var name: String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f.string(from: createdAt)
+    }
+
+    init(workingDirectory: String, resumeSessionId: String? = nil) {
         self.workingDirectory = workingDirectory
+        self.resumeSessionId = resumeSessionId
         start()
     }
 
-    deinit {
-        process?.terminate()
-    }
+    deinit { process?.terminate() }
 
     // MARK: - Public
+
+    func terminate() {
+        process?.terminate()
+        process = nil
+    }
 
     func restart() {
         process?.terminate()
@@ -81,13 +96,17 @@ class ClaudeSession: ObservableObject {
         let stderrPipe = Pipe()
 
         proc.executableURL = URL(fileURLWithPath: claudePath)
-        proc.arguments = [
+        var args = [
             "-p",
             "--output-format", "stream-json",
             "--input-format",  "stream-json",
             "--verbose",
             "--dangerously-skip-permissions"
         ]
+        if let resume = resumeSessionId {
+            args += ["--resume", resume]
+        }
+        proc.arguments = args
         proc.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
 
         var env = ProcessInfo.processInfo.environment
@@ -101,14 +120,12 @@ class ClaudeSession: ObservableObject {
 
         stdinHandle = stdinPipe.fileHandleForWriting
 
-        // Read stdout on dedicated queue
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.queue.async { self?.receive(data) }
         }
 
-        // Show stderr in terminal (helps diagnose auth issues, etc.)
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
@@ -130,7 +147,6 @@ class ClaudeSession: ObservableObject {
             try proc.run()
             self.process = proc
 
-            // Fallback: if init event never arrives, mark ready after 4s
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                 guard let self, !self.isReady else { return }
                 self.isReady = true
@@ -158,7 +174,6 @@ class ClaudeSession: ObservableObject {
         guard let data = raw.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            // Show unparseable lines so we can debug
             DispatchQueue.main.async { [weak self] in
                 self?.append("[raw] \(raw)", kind: .system)
             }
@@ -172,6 +187,7 @@ class ClaudeSession: ObservableObject {
             switch type {
 
             case "system" where subtype == "init":
+                self?.sessionId = json["session_id"] as? String
                 self?.isReady = true
                 self?.send(prompt: "/arkan-pocket")
 

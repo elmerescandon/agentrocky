@@ -56,7 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.setFrameOrigin(NSPoint(x: centerX, y: dockTop))
         }
 
-        let contentView = NSHostingView(rootView: RockyView(state: rockyState, session: rockyState.session))
+        let contentView = NSHostingView(rootView: RockyView(state: rockyState))
         contentView.frame = panel.contentView!.bounds
         contentView.autoresizingMask = [.width, .height]
         panel.contentView = contentView
@@ -79,7 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        rockyState.session.$isRunning
+        rockyState.$activeIsRunning
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRunning in
                 if isRunning { self?.resetIdle() }

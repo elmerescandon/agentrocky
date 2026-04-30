@@ -6,43 +6,41 @@
 import SwiftUI
 import AppKit
 
+struct AnimatedGIFView: NSViewRepresentable {
+    let gifName: String
+
+    func makeNSView(context: Context) -> NSImageView {
+        let view = NSImageView()
+        view.imageScaling = .scaleProportionallyUpOrDown
+        view.animates = true
+        loadGIF(into: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSImageView, context: Context) {
+        loadGIF(into: nsView)
+    }
+
+    private func loadGIF(into view: NSImageView) {
+        if let url = Bundle.main.url(forResource: gifName, withExtension: "gif"),
+           let image = NSImage(contentsOf: url) {
+            view.image = image
+            view.animates = true
+        }
+    }
+}
+
 struct RockyView: View {
     @ObservedObject var state: RockyState
-    @ObservedObject var session: ClaudeSession
-    @StateObject private var animator = SpriteAnimator()
 
-    @State private var showChat = false
-    @State private var wasRunning = false
-    @State private var isExpanded = false
-    @State private var isDragging = false
+    @State private var showChat       = false
+    @State private var wasRunning     = false
+    @State private var isExpanded     = false
+    @State private var bounceScale: CGFloat = 1.0
+    @State private var shakeOffset: CGFloat = 0
+    @State private var isDragging     = false
     @State private var dragWindowOrigin: NSPoint = .zero
-    @State private var dragMouseStart: NSPoint = .zero
-
-    // MARK: - Animation configs
-
-    enum Anim {
-        case idle, walking, sleeping, hopping, hurting, tripping, fainting, floating
-    }
-
-    struct AnimConfig {
-        let name: String
-        let fw: Int, fh: Int
-        let durations: [Int]
-        let loops: Bool
-    }
-
-    static let configs: [Anim: AnimConfig] = [
-        .idle:     AnimConfig(name: "alakazam-idle",   fw: 32, fh: 48, durations: [6,6,6,6,6,6,6,6],         loops: true),
-        .walking:  AnimConfig(name: "alakazam-walk",   fw: 32, fh: 40, durations: [8,12,8,12],               loops: true),
-        .sleeping: AnimConfig(name: "alakazam-sleep",  fw: 24, fh: 32, durations: [30,35],                   loops: true),
-        .hopping:  AnimConfig(name: "alakazam-charge",   fw: 40, fh: 48, durations: [2,2,2,2,2,2,2,2,2,2], loops: false),
-        .hurting:  AnimConfig(name: "alakazam-hurt",   fw: 48, fh: 64, durations: [2,8],                     loops: false),
-        .tripping: AnimConfig(name: "alakazam-rotate", fw: 32, fh: 40, durations: [2,2,2,2,2,2,2,2,2],      loops: false),
-        .fainting: AnimConfig(name: "alakazam-hurt",   fw: 48, fh: 64, durations: [2,8],                     loops: false),
-        .floating: AnimConfig(name: "alakazam-idle",   fw: 32, fh: 48, durations: [6,6,6,6,6,6,6,6],        loops: true),
-    ]
-
-    // MARK: - Body
+    @State private var dragMouseStart:  NSPoint  = .zero
 
     var body: some View {
         Button(action: {
@@ -51,11 +49,10 @@ struct RockyView: View {
             showChat = state.isChatOpen
             if showChat { NSApp.activate(ignoringOtherApps: true) }
         }) {
-            Image(nsImage: animator.currentFrame)
-                .interpolation(.none)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 144, height: 144)
+            AnimatedGIFView(gifName: state.activeIsRunning ? "snorlax-active" : "snorlax")
+                .frame(width: 96, height: 96)
+                .scaleEffect(bounceScale)
+                .offset(x: shakeOffset)
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
@@ -67,7 +64,6 @@ struct RockyView: View {
                         if let window = NSApp.windows.first(where: { $0 is NSPanel }) {
                             dragWindowOrigin = window.frame.origin
                         }
-                        transition(to: .tripping)
                     }
                     let mouse = NSEvent.mouseLocation
                     if let window = NSApp.windows.first(where: { $0 is NSPanel }) {
@@ -82,32 +78,34 @@ struct RockyView: View {
                 }
         )
         .popover(isPresented: $showChat, arrowEdge: .top) {
-            ChatView(session: session, isExpanded: $isExpanded)
+            ChatView(state: state, isExpanded: $isExpanded)
                 .frame(width: isExpanded ? 720 : 420, height: isExpanded ? 800 : 520)
         }
         .onChange(of: showChat) { open in state.isChatOpen = open }
-        .onChange(of: session.isRunning) { running in
-            if running {
-                transition(to: .walking)
-            } else if wasRunning {
-                transition(to: .hopping) { transition(to: .idle) }
-            }
+        .onChange(of: state.activeIsRunning) { running in
+            if wasRunning && !running { bounce() }
             wasRunning = running
         }
-        .onChange(of: session.errorCount) { _ in
-            transition(to: .hurting) { transition(to: .idle) }
+        .onChange(of: state.activeErrorCount) { _ in shake() }
+    }
+
+    private func bounce() {
+        withAnimation(.interpolatingSpring(stiffness: 300, damping: 8)) {
+            bounceScale = 1.25
         }
-        .onAppear {
-            transition(to: .idle)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            withAnimation(.interpolatingSpring(stiffness: 200, damping: 10)) {
+                bounceScale = 1.0
+            }
         }
     }
 
-    // MARK: - Helpers
-
-    private func transition(to anim: Anim, onComplete: (() -> Void)? = nil) {
-        guard let cfg = Self.configs[anim] else { return }
-        animator.configure(imageName: cfg.name, frameWidth: cfg.fw, frameHeight: cfg.fh,
-                           durations: cfg.durations, direction: 0)
-        animator.play(loops: cfg.loops, onComplete: onComplete)
+    private func shake() {
+        let offsets: [CGFloat] = [0, -8, 8, -6, 6, -3, 3, 0]
+        for (i, offset) in offsets.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) {
+                withAnimation(.easeInOut(duration: 0.05)) { shakeOffset = offset }
+            }
+        }
     }
 }
