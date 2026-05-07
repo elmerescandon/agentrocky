@@ -16,6 +16,9 @@ class ClaudeSession: ObservableObject, Identifiable {
     @Published var isReady: Bool = false
     @Published var isRunning: Bool = false
     @Published var errorCount: Int = 0
+    @Published var contextPercent: Double? = nil
+
+    var draft: String = ""
 
     private(set) var sessionId: String?
     private let resumeSessionId: String?
@@ -62,6 +65,7 @@ class ClaudeSession: ObservableObject, Identifiable {
             self.lines = []
             self.isReady = false
             self.isRunning = false
+            self.contextPercent = nil
         }
         start()
     }
@@ -197,6 +201,10 @@ class ClaudeSession: ObservableObject, Identifiable {
                 for block in content { self?.renderBlock(block) }
 
             case "result":
+                if let usage = json["usage"] as? [String: Any],
+                   let inputTokens = usage["input_tokens"] as? Int {
+                    self?.contextPercent = min(Double(inputTokens) / 200_000.0 * 100.0, 100.0)
+                }
                 self?.isRunning = false
                 self?.append("", kind: .text)
 

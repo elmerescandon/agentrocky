@@ -12,9 +12,15 @@ struct ChatView: View {
     @ObservedObject var state: RockyState
     @Binding var isExpanded: Bool
     @Environment(\.dismiss) private var dismiss
-    @State private var input: String = ""
+    @State private var input: String
     @FocusState private var inputFocused: Bool
     @State private var showHistory = false
+
+    init(state: RockyState, isExpanded: Binding<Bool>) {
+        self.state = state
+        self._isExpanded = isExpanded
+        self._input = State(initialValue: state.activeSession.draft)
+    }
 
     private var promptLabel: String {
         URL(fileURLWithPath: state.activeSession.workingDirectory).lastPathComponent
@@ -84,6 +90,8 @@ struct ChatView: View {
         }
         .background(Color(red: 0.04, green: 0.04, blue: 0.04).opacity(0.8))
         .onExitCommand { dismiss() }
+        .onChange(of: input) { newValue in state.activeSession.draft = newValue }
+        .onChange(of: state.activeIndex) { _ in input = state.activeSession.draft }
     }
 
     // MARK: - Tab bar
@@ -129,6 +137,13 @@ struct ChatView: View {
 
             Spacer()
 
+            if let pct = state.activeContextPercent {
+                Text(String(format: "ctx %.0f%%", pct))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(contextColor(pct))
+                    .padding(.horizontal, 6)
+            }
+
             // Grupo derecho: nueva sesión + ampliar + reiniciar
             HStack(spacing: 0) {
                 HeaderButton(label: "+") {
@@ -153,6 +168,14 @@ struct ChatView: View {
         }
         .frame(height: 36)
         .padding(.horizontal, 4)
+    }
+
+    // MARK: - Context color
+
+    private func contextColor(_ pct: Double) -> Color {
+        if pct > 80 { return Color(red: 1.0, green: 0.4, blue: 0.4) }
+        if pct > 60 { return Color(red: 1.0, green: 0.85, blue: 0.3) }
+        return Color(red: 0.4, green: 0.8, blue: 1.0).opacity(0.7)
     }
 
     // MARK: - Send

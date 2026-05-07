@@ -17,6 +17,7 @@ class RockyState: ObservableObject {
     @Published var activeErrorCount: Int = 0
     @Published var activeIsReady: Bool = false
     @Published var activeLines: [ClaudeSession.OutputLine] = []
+    @Published var activeContextPercent: Double? = nil
 
     @Published var history: [HistoryEntry] = []
 
@@ -32,7 +33,7 @@ class RockyState: ObservableObject {
     // MARK: - Session management
 
     func addSession(resuming sessionId: String? = nil) {
-        let session = ClaudeSession(workingDirectory: realHome, resumeSessionId: sessionId)
+        let session = ClaudeSession(workingDirectory: realHome + "/Documents/ArkangelAI/arkangel-vault", resumeSessionId: sessionId)
         sessions.append(session)
         switchTo(sessions.count - 1)
     }
@@ -92,6 +93,11 @@ class RockyState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] v in self?.activeLines = v }
             .store(in: &sessionCancellables)
+
+        active.$contextPercent
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] v in self?.activeContextPercent = v }
+            .store(in: &sessionCancellables)
     }
 
     private var historyDir: URL {
@@ -100,7 +106,8 @@ class RockyState: ObservableObject {
     }
 
     private var projectKey: String {
-        realHome.replacingOccurrences(of: "/", with: "-")
+        (realHome + "/Documents/ArkangelAI/arkangel-vault")
+            .replacingOccurrences(of: "/", with: "-")
     }
 
     private var realHome: String {
