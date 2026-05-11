@@ -5,17 +5,29 @@
 
 import Foundation
 
+struct MonthMetrics {
+    var totalTokens: Int = 0
+    var totalQuestions: Int = 0
+    var totalSessions: Int = 0
+    var hourDistribution: [Int: Int] = [:]
+    var dailyQuestions: [String: Int] = [:]
+
+    var peakHour: Int? { hourDistribution.max(by: { $0.value < $1.value })?.key }
+    var peakDay:  String? { dailyQuestions.max(by: { $0.value < $1.value })?.key }
+}
+
 struct UsageMetrics {
     var totalSessions: Int = 0
     var totalQuestions: Int = 0
     var totalTokens: Int = 0
-    var topProjects: [(name: String, count: Int)] = []
     var hourDistribution: [Int: Int] = [:]
     var peakHour: Int? = nil
     var streak: Int = 0
-    var topSkills: [(name: String, count: Int)] = []
     var firstSessionDate: Date? = nil
     var sessionsToday: Int = 0
+    var dailyQuestions: [String: Int] = [:]
+    var months: [String: MonthMetrics] = [:]       // "yyyy-MM" → MonthMetrics
+    var availableMonths: [String] = []             // sorted descending
     var loadedAt: Date = Date()
 }
 
@@ -45,16 +57,15 @@ enum MetricsParser {
         var metrics = UsageMetrics()
         metrics.totalSessions = jsonlFiles.count
 
-        var projectCounts: [String: Int] = [:]
-        var skillCounts:   [String: Int] = [:]
-        var hourCounts:    [Int: Int]    = [:]
-        var sessionDays:   Set<String>   = []
+        var hourCounts:     [Int: Int]    = [:]
+        var dailyQuestions: [String: Int] = [:]
+        var sessionDays:    Set<String>   = []
+        var monthData:      [String: MonthMetrics] = [:]
 
         let calendar = Calendar.current
         let todayStr = dayString(calendar.startOfDay(for: Date()))
 
         for fileURL in jsonlFiles {
-            // Modification date → streak + today count
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             if let modDate = attrs?[.modificationDate] as? Date {
                 let ds = dayString(calendar.startOfDay(for: modDate))
@@ -65,11 +76,10 @@ enum MetricsParser {
                 } else {
                     metrics.firstSessionDate = modDate
                 }
+                monthData[month(from: ds), default: MonthMetrics()].totalSessions += 1
             }
 
             guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
-
-            var projectRecorded = false
 
             for line in content.components(separatedBy: "\n") {
                 guard !line.isEmpty,
@@ -79,56 +89,49 @@ enum MetricsParser {
 
                 let type = json["type"] as? String ?? ""
 
-                // First cwd found → session's project
-                if !projectRecorded, let cwd = json["cwd"] as? String, !cwd.isEmpty {
-                    let project = URL(fileURLWithPath: cwd).lastPathComponent
-                    if !project.isEmpty {
-                        projectCounts[project, default: 0] += 1
-                        projectRecorded = true
-                    }
-                }
-
                 if type == "user" {
                     let text = extractText(from: json)
-
-                    if !text.isEmpty {
-                        metrics.totalQuestions += 1
-
-                        // Detect /skill invocations
-                        let trimmed = text.trimmingCharacters(in: .whitespaces)
-                        if trimmed.hasPrefix("/") {
-                            let firstWord = trimmed.components(separatedBy: .whitespaces).first ?? ""
-                            let clean = String(firstWord.prefix(while: {
-                                $0.isLetter || $0 == "-" || $0 == "/" || $0.isNumber || $0 == "_" || $0 == ":"
-                            }))
-                            if clean.count > 1 {
-                                skillCounts[clean, default: 0] += 1
-                            }
-                        }
-                    }
-
-                    // Hour from timestamp
                     if let tsStr = json["timestamp"] as? String,
                        let date = parseISO8601(tsStr) {
                         let hour = calendar.component(.hour, from: date)
+                        let ds   = dayString(calendar.startOfDay(for: date))
+                        let mk   = month(from: ds)
+
                         hourCounts[hour, default: 0] += 1
+                        dailyQuestions[ds, default: 0] += 1
+
+                        monthData[mk, default: MonthMetrics()].hourDistribution[hour, default: 0] += 1
+                        monthData[mk, default: MonthMetrics()].dailyQuestions[ds, default: 0] += 1
+
+                        if !text.isEmpty {
+                            metrics.totalQuestions += 1
+                            monthData[mk, default: MonthMetrics()].totalQuestions += 1
+                        }
                     }
                 }
 
-                if type == "result",
-                   let usage = json["usage"] as? [String: Any] {
-                    metrics.totalTokens += (usage["input_tokens"] as? Int ?? 0)
-                        + (usage["output_tokens"] as? Int ?? 0)
+                if type == "assistant",
+                   let message = json["message"] as? [String: Any],
+                   let usage   = message["usage"] as? [String: Any] {
+                    let output = usage["output_tokens"] as? Int ?? 0
+                    metrics.totalTokens += output
+
+                    if let tsStr = json["timestamp"] as? String,
+                       let date = parseISO8601(tsStr) {
+                        let mk = month(from: dayString(calendar.startOfDay(for: date)))
+                        monthData[mk, default: MonthMetrics()].totalTokens += output
+                    }
                 }
             }
         }
 
-        metrics.streak      = calculateStreak(days: sessionDays, calendar: calendar)
-        metrics.topProjects = projectCounts.sorted { $0.value > $1.value }.prefix(5).map { ($0.key, $0.value) }
-        metrics.topSkills   = skillCounts.sorted   { $0.value > $1.value }.prefix(5).map { ($0.key, $0.value) }
+        metrics.streak           = calculateStreak(days: sessionDays, calendar: calendar)
         metrics.hourDistribution = hourCounts
-        metrics.peakHour    = hourCounts.max(by: { $0.value < $1.value })?.key
-        metrics.loadedAt    = Date()
+        metrics.peakHour         = hourCounts.max(by: { $0.value < $1.value })?.key
+        metrics.dailyQuestions   = dailyQuestions
+        metrics.months           = monthData
+        metrics.availableMonths  = monthData.keys.sorted().reversed()
+        metrics.loadedAt         = Date()
 
         return metrics
     }
@@ -152,6 +155,7 @@ enum MetricsParser {
     }()
 
     private static func dayString(_ date: Date) -> String { dayFmt.string(from: date) }
+    private static func month(from ds: String) -> String  { String(ds.prefix(7)) }
 
     private static let isoA: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
