@@ -20,12 +20,19 @@ class RockyState: ObservableObject {
     @Published var activeContextPercent: Double? = nil
 
     @Published var history: [HistoryEntry] = []
+    @Published var metrics: UsageMetrics? = nil
+    @Published var isLoadingMetrics = false
 
     private var sessionCancellables = Set<AnyCancellable>()
 
     init() {
         loadHistory()
-        addSession()
+        // Reanudar la sesión más reciente si existe, si no crear una nueva
+        if let latest = history.first {
+            addSession(resuming: latest.id)
+        } else {
+            addSession()
+        }
     }
 
     var activeSession: ClaudeSession { sessions[activeIndex] }
@@ -51,6 +58,20 @@ class RockyState: ObservableObject {
         guard index < sessions.count else { return }
         activeIndex = index
         subscribeToActiveSession()
+    }
+
+    // MARK: - Metrics
+
+    func loadMetrics() {
+        guard !isLoadingMetrics else { return }
+        isLoadingMetrics = true
+        Task {
+            let m = await MetricsParser.load(from: historyDir)
+            await MainActor.run {
+                self.metrics = m
+                self.isLoadingMetrics = false
+            }
+        }
     }
 
     // MARK: - History
@@ -100,7 +121,7 @@ class RockyState: ObservableObject {
             .store(in: &sessionCancellables)
     }
 
-    private var historyDir: URL {
+    var historyDir: URL {
         URL(fileURLWithPath: realHome)
             .appendingPathComponent(".claude/projects/\(projectKey)")
     }

@@ -19,6 +19,7 @@ struct agentrockyApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var rockyWindow: NSPanel?
     var rockyState = RockyState()
+    var statusItem: NSStatusItem?
 
     private let panelWidth: CGFloat = 156
     private let panelHeight: CGFloat = 156
@@ -32,8 +33,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         setupWindow()
+        setupStatusItem()
         setupIdleTimer()
         observeInteractions()
+    }
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = statusItem?.button {
+            button.image = NSImage(systemSymbolName: "r.circle.fill", accessibilityDescription: "Rocky")
+            button.image?.isTemplate = true
+        }
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Reiniciar", action: #selector(restartApp), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Salir", action: #selector(quitApp), keyEquivalent: "q"))
+        statusItem?.menu = menu
+    }
+
+    @objc private func restartApp() {
+        let url = Bundle.main.bundleURL
+        NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
+        NSApp.terminate(nil)
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
     }
 
     private func setupWindow() {

@@ -11,10 +11,12 @@ private let kIconFrame: CGFloat = 28
 struct ChatView: View {
     @ObservedObject var state: RockyState
     @Binding var isExpanded: Bool
-    @Environment(\.dismiss) private var dismiss
     @State private var input: String
     @FocusState private var inputFocused: Bool
-    @State private var showHistory = false
+    @State private var showHistory  = false
+    @State private var showFleet    = false
+    @State private var showMetrics  = false
+    @State private var keyMonitor: Any?
 
     init(state: RockyState, isExpanded: Binding<Bool>) {
         self.state = state
@@ -32,11 +34,15 @@ struct ChatView: View {
 
             Divider().background(Color.white.opacity(0.1))
 
-            if showHistory {
+            if showFleet {
+                FleetView()
+            } else if showHistory {
                 HistoryList(state: state) {
                     showHistory = false
                     inputFocused = true
                 }
+            } else if showMetrics {
+                MetricsView(metrics: state.metrics, isLoading: state.isLoadingMetrics)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -89,9 +95,18 @@ struct ChatView: View {
             .background(Color.black.opacity(0.5))
         }
         .background(Color(red: 0.04, green: 0.04, blue: 0.04).opacity(0.8))
-        .onExitCommand { dismiss() }
         .onChange(of: input) { newValue in state.activeSession.draft = newValue }
         .onChange(of: state.activeIndex) { _ in input = state.activeSession.draft }
+        .onAppear {
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == 53 else { return event }
+                if state.activeIsRunning { state.activeSession.cancel() }
+                return nil
+            }
+        }
+        .onDisappear {
+            if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        }
     }
 
     // MARK: - Tab bar
@@ -101,9 +116,29 @@ struct ChatView: View {
             // Historial — toggle inline
             HeaderButton(label: "◷", active: showHistory) {
                 showHistory.toggle()
+                if showHistory { showFleet = false; showMetrics = false }
             }
             .help("Historial  ⌘H")
             .keyboardShortcut("h", modifiers: .command)
+
+            // Fleet — toggle inline
+            HeaderButton(label: "☰", active: showFleet) {
+                showFleet.toggle()
+                if showFleet { showHistory = false; showMetrics = false }
+            }
+            .help("Fleet  ⌘F")
+            .keyboardShortcut("f", modifiers: .command)
+
+            // Métricas — toggle inline
+            HeaderButton(label: "∑", active: showMetrics) {
+                showMetrics.toggle()
+                if showMetrics {
+                    showHistory = false; showFleet = false
+                    state.loadMetrics()
+                }
+            }
+            .help("Métricas  ⌘M")
+            .keyboardShortcut("m", modifiers: .command)
 
             Divider()
                 .frame(height: 16)

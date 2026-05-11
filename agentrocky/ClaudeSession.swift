@@ -22,10 +22,13 @@ class ClaudeSession: ObservableObject, Identifiable {
 
     private(set) var sessionId: String?
     private let resumeSessionId: String?
+    private var hasAutoRun = false
 
     private var process: Process?
     private var stdinHandle: FileHandle?
     private var readBuffer = Data()
+    private var isCancelling = false
+    private var isTerminating = false
     private let queue = DispatchQueue(label: "rocky.session", qos: .userInitiated)
 
     struct OutputLine: Identifiable {
@@ -52,11 +55,13 @@ class ClaudeSession: ObservableObject, Identifiable {
     // MARK: - Public
 
     func terminate() {
+        isTerminating = true
         process?.terminate()
         process = nil
     }
 
     func restart() {
+        isTerminating = true
         process?.terminate()
         process = nil
         stdinHandle = nil
@@ -68,6 +73,19 @@ class ClaudeSession: ObservableObject, Identifiable {
             self.contextPercent = nil
         }
         start()
+    }
+
+    func cancel() {
+        guard isRunning else { return }
+        isCancelling = true
+        DispatchQueue.main.async {
+            self.append("^C", kind: .system)
+            self.isRunning = false
+            // isReady se mantiene true — el input queda disponible de inmediato
+        }
+        // Solo SIGINT. Si Claude lo maneja sin morir, emitirá un result y continuará.
+        // Si muere, terminationHandler se encarga del restart silencioso.
+        process?.interrupt()
     }
 
     func send(prompt: String) {
@@ -88,7 +106,7 @@ class ClaudeSession: ObservableObject, Identifiable {
 
     // MARK: - Process lifecycle
 
-    private func start() {
+    private func start(resuming overrideId: String? = nil) {
         guard let claudePath = findClaude() else {
             append("arkan binary not found — checked:\n" + searchPaths().joined(separator: "\n"), kind: .error)
             return
@@ -107,7 +125,8 @@ class ClaudeSession: ObservableObject, Identifiable {
             "--verbose",
             "--dangerously-skip-permissions"
         ]
-        if let resume = resumeSessionId {
+        let resumeId = overrideId ?? resumeSessionId
+        if let resume = resumeId {
             args += ["--resume", resume]
         }
         proc.arguments = args
@@ -139,11 +158,30 @@ class ClaudeSession: ObservableObject, Identifiable {
         }
 
         proc.terminationHandler = { [weak self] p in
+            guard let self else { return }
+            let savedSessionId = self.sessionId
+            let wasCancelling  = self.isCancelling
+            let wasTerminating = self.isTerminating
+            self.isCancelling  = false
+            self.isTerminating = false
+            self.process       = nil
+            self.stdinHandle   = nil
+            self.readBuffer    = Data()
+
             DispatchQueue.main.async {
-                self?.isReady   = false
-                self?.isRunning = false
-                self?.append("Process exited (code \(p.terminationStatus))", kind: .system)
-                if p.terminationStatus != 0 { self?.errorCount += 1 }
+                self.isRunning = false
+                if wasTerminating {
+                    // Stop intencional — no reiniciar
+                    self.isReady = false
+                } else if wasCancelling {
+                    // El proceso murió por SIGINT — restart silencioso preservando sesión
+                    self.start(resuming: savedSessionId)
+                } else {
+                    // Exit inesperado — mostrar error
+                    self.isReady = false
+                    self.append("Process exited (code \(p.terminationStatus))", kind: .system)
+                    if p.terminationStatus != 0 { self.errorCount += 1 }
+                }
             }
         }
 
@@ -193,7 +231,10 @@ class ClaudeSession: ObservableObject, Identifiable {
             case "system" where subtype == "init":
                 self?.sessionId = json["session_id"] as? String
                 self?.isReady = true
-                self?.send(prompt: "/arkan-pocket")
+                if self?.hasAutoRun == false && self?.resumeSessionId == nil {
+                    self?.hasAutoRun = true
+                    self?.send(prompt: "/arkan-pocket")
+                }
 
             case "assistant":
                 guard let message = json["message"] as? [String: Any],
@@ -201,10 +242,20 @@ class ClaudeSession: ObservableObject, Identifiable {
                 for block in content { self?.renderBlock(block) }
 
             case "result":
-                if let usage = json["usage"] as? [String: Any],
-                   let inputTokens = usage["input_tokens"] as? Int {
-                    self?.contextPercent = min(Double(inputTokens) / 200_000.0 * 100.0, 100.0)
+                if let usage = json["usage"] as? [String: Any] {
+                    let input   = usage["input_tokens"]                as? Int ?? 0
+                    let created = usage["cache_creation_input_tokens"] as? Int ?? 0
+                    let read    = usage["cache_read_input_tokens"]     as? Int ?? 0
+                    let total   = input + created + read
+
+                    var window = 400_000
+                    if let modelUsage = json["modelUsage"] as? [String: Any],
+                       let model = modelUsage.values.first as? [String: Any],
+                       let w = model["contextWindow"] as? Int { window = w }
+
+                    self?.contextPercent = min(Double(total) / Double(window) * 100.0, 100.0)
                 }
+                self?.isCancelling = false
                 self?.isRunning = false
                 self?.append("", kind: .text)
 
