@@ -7,15 +7,6 @@ import SwiftUI
 import AppKit
 
 
-private func spriteFrame(named: String, frameWidth: Int, frameHeight: Int, col: Int = 0, row: Int = 0) -> Image {
-    guard let src = NSImage(named: named),
-          let cg = src.cgImage(forProposedRect: nil, context: nil, hints: nil),
-          let cropped = cg.cropping(to: CGRect(x: col * frameWidth, y: row * frameHeight,
-                                               width: frameWidth, height: frameHeight))
-    else { return Image(named) }
-    return Image(nsImage: NSImage(cgImage: cropped, size: NSSize(width: frameWidth, height: frameHeight)))
-}
-
 struct RockyView: View {
     @ObservedObject var state: RockyState
 
@@ -28,14 +19,6 @@ struct RockyView: View {
     @State private var dragWindowOrigin: NSPoint = .zero
     @State private var dragMouseStart:  NSPoint  = .zero
 
-    private var sprite: Image {
-        if state.activeIsRunning {
-            return spriteFrame(named: "alakazam-charge", frameWidth: 40, frameHeight: 48)
-        } else {
-            return spriteFrame(named: "alakazam-idle", frameWidth: 32, frameHeight: 48)
-        }
-    }
-
     var body: some View {
         Button(action: {
             guard !isDragging else { return }
@@ -43,9 +26,7 @@ struct RockyView: View {
             showChat = state.isChatOpen
             if showChat { NSApp.activate(ignoringOtherApps: true) }
         }) {
-            sprite
-                .resizable()
-                .scaledToFit()
+            SpriteAnimView(gifName: state.activeIsRunning ? "snorlax-active" : "snorlax")
                 .frame(width: 96, height: 96)
                 .scaleEffect(bounceScale)
                 .offset(x: shakeOffset)

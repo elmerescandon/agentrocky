@@ -3,32 +3,52 @@ import SwiftUI
 struct FleetInstance: Identifiable, Decodable {
     let id: String
     let shortId: String
+    let issue: String
     let repo: String
-    let session: String
+    let session: String?
     let status: String
     let description: String
     let prUrl: String?
     let blockedReason: String?
+    let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, session, status, description
-        case shortId      = "short_id"
-        case prUrl        = "pr_url"
+        case id, repo, session, status, description, issue
+        case shortId       = "short_id"
+        case prUrl         = "pr_url"
         case blockedReason = "blocked_reason"
+        case createdAt     = "created_at"
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id            = try c.decode(String.self, forKey: .id)
         shortId       = try c.decode(String.self, forKey: .shortId)
+        issue         = (try? c.decodeIfPresent(String.self, forKey: .issue)) ?? ""
         repo          = try c.decode(String.self, forKey: .repo)
-        session       = try c.decode(String.self, forKey: .session)
+        session       = try c.decodeIfPresent(String.self, forKey: .session)
         status        = try c.decode(String.self, forKey: .status)
         description   = try c.decode(String.self, forKey: .description)
         let rawPr     = try c.decodeIfPresent(String.self, forKey: .prUrl)
         prUrl         = (rawPr?.isEmpty == false) ? rawPr : nil
         let rawBlocked = try c.decodeIfPresent(String.self, forKey: .blockedReason)
         blockedReason = (rawBlocked?.isEmpty == false) ? rawBlocked : nil
+
+        if let dateStr = try? c.decodeIfPresent(String.self, forKey: .createdAt) {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = iso.date(from: dateStr) {
+                createdAt = d
+            } else {
+                // Python's datetime.isoformat() omits timezone
+                let df = DateFormatter()
+                df.locale = Locale(identifier: "en_US_POSIX")
+                df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+                createdAt = df.date(from: dateStr)
+            }
+        } else {
+            createdAt = nil
+        }
     }
 }
 
@@ -36,6 +56,34 @@ struct FleetView: View {
     @State private var instances: [FleetInstance] = []
     @State private var lastUpdated: Date = Date()
     @State private var timer: Timer?
+    @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
+
+    private var availableDays: [Date] {
+        let cal = Calendar.current
+        let days = Set(instances.compactMap { inst -> Date? in
+            guard let d = inst.createdAt else { return nil }
+            return cal.startOfDay(for: d)
+        })
+        return days.sorted()
+    }
+
+    private var filtered: [FleetInstance] {
+        let cal = Calendar.current
+        return instances.filter { inst in
+            guard let d = inst.createdAt else { return false }
+            return cal.isDate(d, inSameDayAs: selectedDate)
+        }
+    }
+
+    private var canGoPrev: Bool {
+        guard let idx = availableDays.firstIndex(of: selectedDate) else { return false }
+        return idx > 0
+    }
+
+    private var canGoNext: Bool {
+        guard let idx = availableDays.firstIndex(of: selectedDate) else { return false }
+        return idx < availableDays.count - 1
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,14 +98,28 @@ struct FleetView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 4) {
             Text("fleet")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white.opacity(0.5))
             Spacer()
-            Text("actualizado \(secondsAgo())s")
+            Button("←") { stepDay(-1) }
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(canGoPrev ? .white.opacity(0.7) : .white.opacity(0.15))
+                .buttonStyle(.plain)
+                .disabled(!canGoPrev)
+            Text(dayLabel(selectedDate))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.white.opacity(0.75))
+                .frame(minWidth: 56, alignment: .center)
+            Button("→") { stepDay(1) }
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(canGoNext ? .white.opacity(0.7) : .white.opacity(0.15))
+                .buttonStyle(.plain)
+                .disabled(!canGoNext)
+            Text("· \(secondsAgo())s")
                 .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(.white.opacity(0.3))
+                .foregroundColor(.white.opacity(0.25))
             Button {
                 refresh()
             } label: {
@@ -75,24 +137,25 @@ struct FleetView: View {
 
     @ViewBuilder
     private var content: some View {
-        if instances.isEmpty {
+        if filtered.isEmpty {
             VStack {
                 Spacer()
-                Text("sin instancias activas")
+                Text(instances.isEmpty ? "sin instancias activas" : "sin instancias este día")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
                 Spacer()
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                VStack(spacing: 1) {
-                    ForEach(instances) { instance in
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 1) {
+                    ForEach(filtered) { instance in
                         FleetRow(instance: instance)
                     }
                 }
                 .padding(.vertical, 6)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -107,21 +170,45 @@ struct FleetView: View {
     private func refresh() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = [
-            "\(NSHomeDirectory())/.arkan-fleet/fleet.py", "list"
-        ]
+        process.arguments = ["\(NSHomeDirectory())/.arkan-fleet/fleet.py", "list"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
         process.launch()
         process.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let decoded = try? JSONDecoder().decode([FleetInstance].self, from: data) {
-            DispatchQueue.main.async {
-                instances = decoded
-                lastUpdated = Date()
+        guard let decoded = try? JSONDecoder().decode([FleetInstance].self, from: data) else { return }
+
+        let cal = Calendar.current
+        let days = Set(decoded.compactMap { inst -> Date? in
+            guard let d = inst.createdAt else { return nil }
+            return cal.startOfDay(for: d)
+        }).sorted()
+
+        DispatchQueue.main.async {
+            self.instances = decoded
+            self.lastUpdated = Date()
+            if !days.contains(self.selectedDate), let last = days.last {
+                self.selectedDate = last
             }
         }
+    }
+
+    private func stepDay(_ delta: Int) {
+        guard let idx = availableDays.firstIndex(of: selectedDate) else { return }
+        let newIdx = idx + delta
+        guard newIdx >= 0, newIdx < availableDays.count else { return }
+        selectedDate = availableDays[newIdx]
+    }
+
+    private func dayLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "hoy" }
+        if cal.isDateInYesterday(date) { return "ayer" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "d MMM"
+        fmt.locale = Locale(identifier: "es_MX")
+        return fmt.string(from: date)
     }
 
     private func secondsAgo() -> Int {
@@ -156,6 +243,13 @@ struct FleetRow: View {
         }
     }
 
+    private var label: String {
+        if let blocked = instance.blockedReason { return blocked }
+        if !instance.description.isEmpty { return instance.description }
+        if !instance.issue.isEmpty { return "#\(instance.issue) · \(instance.repo)" }
+        return instance.repo
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Text(statusDot)
@@ -168,7 +262,7 @@ struct FleetRow: View {
                 .foregroundColor(.white.opacity(0.9))
                 .frame(width: 64, alignment: .leading)
 
-            Text(instance.blockedReason ?? (instance.description.isEmpty ? instance.repo : instance.description))
+            Text(label)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(instance.status == "blocked" ? Color(red: 1.0, green: 0.6, blue: 0.1) : .white.opacity(0.55))
                 .frame(maxWidth: .infinity, alignment: .leading)

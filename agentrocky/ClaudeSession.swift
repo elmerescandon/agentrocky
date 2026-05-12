@@ -26,6 +26,8 @@ class ClaudeSession: ObservableObject, Identifiable {
 
     private var process: Process?
     private var stdinHandle: FileHandle?
+    private var stdoutHandle: FileHandle?
+    private var stderrHandle: FileHandle?
     private var readBuffer = Data()
     private var isCancelling = false
     private var isTerminating = false
@@ -58,6 +60,7 @@ class ClaudeSession: ObservableObject, Identifiable {
         isTerminating = true
         process?.terminate()
         process = nil
+        clearPipeHandlers()
     }
 
     func restart() {
@@ -65,6 +68,7 @@ class ClaudeSession: ObservableObject, Identifiable {
         process?.terminate()
         process = nil
         stdinHandle = nil
+        clearPipeHandlers()
         readBuffer = Data()
         DispatchQueue.main.async {
             self.lines = []
@@ -141,15 +145,17 @@ class ClaudeSession: ObservableObject, Identifiable {
         proc.standardOutput = stdoutPipe
         proc.standardError  = stderrPipe
 
-        stdinHandle = stdinPipe.fileHandleForWriting
+        stdinHandle  = stdinPipe.fileHandleForWriting
+        stdoutHandle = stdoutPipe.fileHandleForReading
+        stderrHandle = stderrPipe.fileHandleForReading
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        stdoutHandle?.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.queue.async { self?.receive(data) }
         }
 
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        stderrHandle?.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let str = String(data: data, encoding: .utf8) else { return }
             let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -166,6 +172,7 @@ class ClaudeSession: ObservableObject, Identifiable {
             self.isTerminating = false
             self.process       = nil
             self.stdinHandle   = nil
+            self.clearPipeHandlers()
             self.readBuffer    = Data()
 
             DispatchQueue.main.async {
@@ -293,6 +300,13 @@ class ClaudeSession: ObservableObject, Identifiable {
         DispatchQueue.main.async { [weak self] in
             self?.lines.append(OutputLine(text: text, kind: kind))
         }
+    }
+
+    private func clearPipeHandlers() {
+        stdoutHandle?.readabilityHandler = nil
+        stderrHandle?.readabilityHandler = nil
+        stdoutHandle = nil
+        stderrHandle = nil
     }
 
     private func findClaude() -> String? {
