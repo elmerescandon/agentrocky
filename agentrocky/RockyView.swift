@@ -6,28 +6,14 @@
 import SwiftUI
 import AppKit
 
-struct AnimatedGIFView: NSViewRepresentable {
-    let gifName: String
 
-    func makeNSView(context: Context) -> NSImageView {
-        let view = NSImageView()
-        view.imageScaling = .scaleProportionallyUpOrDown
-        view.animates = true
-        loadGIF(into: view)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSImageView, context: Context) {
-        loadGIF(into: nsView)
-    }
-
-    private func loadGIF(into view: NSImageView) {
-        if let url = Bundle.main.url(forResource: gifName, withExtension: "gif"),
-           let image = NSImage(contentsOf: url) {
-            view.image = image
-            view.animates = true
-        }
-    }
+private func spriteFrame(named: String, frameWidth: Int, frameHeight: Int, col: Int = 0, row: Int = 0) -> Image {
+    guard let src = NSImage(named: named),
+          let cg = src.cgImage(forProposedRect: nil, context: nil, hints: nil),
+          let cropped = cg.cropping(to: CGRect(x: col * frameWidth, y: row * frameHeight,
+                                               width: frameWidth, height: frameHeight))
+    else { return Image(named) }
+    return Image(nsImage: NSImage(cgImage: cropped, size: NSSize(width: frameWidth, height: frameHeight)))
 }
 
 struct RockyView: View {
@@ -42,6 +28,14 @@ struct RockyView: View {
     @State private var dragWindowOrigin: NSPoint = .zero
     @State private var dragMouseStart:  NSPoint  = .zero
 
+    private var sprite: Image {
+        if state.activeIsRunning {
+            return spriteFrame(named: "alakazam-charge", frameWidth: 40, frameHeight: 48)
+        } else {
+            return spriteFrame(named: "alakazam-idle", frameWidth: 32, frameHeight: 48)
+        }
+    }
+
     var body: some View {
         Button(action: {
             guard !isDragging else { return }
@@ -49,7 +43,9 @@ struct RockyView: View {
             showChat = state.isChatOpen
             if showChat { NSApp.activate(ignoringOtherApps: true) }
         }) {
-            AnimatedGIFView(gifName: state.activeIsRunning ? "snorlax-active" : "snorlax")
+            sprite
+                .resizable()
+                .scaledToFit()
                 .frame(width: 96, height: 96)
                 .scaleEffect(bounceScale)
                 .offset(x: shakeOffset)

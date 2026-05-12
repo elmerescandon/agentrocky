@@ -302,11 +302,19 @@ class ClaudeSession: ObservableObject, Identifiable {
     private func searchPaths() -> [String] {
         let home = realHome
         return [
+            "\(home)/.local/bin/claude",
+            "\(home)/.npm-global/bin/claude",
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+            "/usr/bin/claude",
+            "\(home)/.local/bin/rocky",
+            "\(home)/.npm-global/bin/rocky",
+            "/opt/homebrew/bin/rocky",
+            "/usr/local/bin/rocky",
             "\(home)/.local/bin/arkan",
             "\(home)/.npm-global/bin/arkan",
             "/opt/homebrew/bin/arkan",
             "/usr/local/bin/arkan",
-            "/usr/bin/arkan",
         ]
     }
 

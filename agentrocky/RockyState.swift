@@ -27,12 +27,7 @@ class RockyState: ObservableObject {
 
     init() {
         loadHistory()
-        // Reanudar la sesión más reciente si existe, si no crear una nueva
-        if let latest = history.first {
-            addSession(resuming: latest.id)
-        } else {
-            addSession()
-        }
+        addSession()
     }
 
     var activeSession: ClaudeSession { sessions[activeIndex] }
